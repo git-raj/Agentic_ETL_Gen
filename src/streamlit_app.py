@@ -11,14 +11,16 @@ def main():
 
     load_dotenv(dotenv_path=".env")
 
-    # Remove left_col to eliminate the gap
+    # Right pane only
     _, right_col = st.columns([0.01, 1.99])
 
     with st.sidebar:
         st.header("🧰 Run Tasks")
         metadata_file = st.file_uploader("📁 Upload ETL Metadata Spreadsheet", type=["xlsx"])
-        llm_option = st.selectbox("🤖 Select LLM", ["OpenAI", "Google Gemini"])
-        target_platform = st.selectbox("🏗️ Target Platform", ["Databricks", "EMR", "AWS Glue"])
+        llm_option = st.selectbox("🤖 Select LLM", ["OpenAI", "Google Gemini", "Other"])
+        st.session_state.llm_option = llm_option
+        target_platform = st.selectbox("🎯 Select Target Platform", ["Databricks", "EMR", "AWS Glue"], index=0)
+        st.session_state.target_platform = target_platform
 
     if metadata_file:
         excel_file = pd.ExcelFile(metadata_file)
@@ -30,14 +32,18 @@ def main():
                 selected_sheet = st.selectbox("Select sheet to preview", sheet_names)
                 st.dataframe(excel_file.parse(selected_sheet), use_container_width=True)
 
-        source_metadata_df = excel_file.parse("Source Metadata")
-        target_metadata_df = excel_file.parse("Target Metadata")
-        mapping_metadata_df = excel_file.parse("Mapping Metadata")
-        etl_metadata_df = excel_file.parse("ETL Metadata")
-        data_quality_rules_df = excel_file.parse("Data Quality Rules")
-        security_compliance_df = excel_file.parse("Security & Compliance")
+        # Parse all sheets into a dictionary of DataFrames
+        all_metadata_dfs = {}
+        for sheet_name in sheet_names:
+            all_metadata_dfs[sheet_name] = excel_file.parse(sheet_name)
 
-        agents = Agents(llm_option=llm_option)
+        # Retrieve specific DataFrames for convenience and for agents that directly use them
+        source_metadata_df = all_metadata_dfs.get("Source Metadata", pd.DataFrame())
+        target_metadata_df = all_metadata_dfs.get("Target Metadata", pd.DataFrame())
+        mapping_metadata_df = all_metadata_dfs.get("Mapping Metadata", pd.DataFrame())
+        etl_metadata_df = all_metadata_dfs.get("ETL Metadata", pd.DataFrame())
+        data_quality_rules_df = all_metadata_dfs.get("Data Quality Rules", pd.DataFrame())
+        security_compliance_df = all_metadata_dfs.get("Security & Compliance", pd.DataFrame())
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         output_dir = os.path.join(base_dir, "output")
@@ -48,48 +54,22 @@ def main():
         os.makedirs(metadata_dir, exist_ok=True)
         os.makedirs(tests_dir, exist_ok=True)
 
-        # Sticky header UI for control panel
         with st.sidebar:
-            st.header("🧰 Run Tasks")
-
             if st.button("🛠️ Generate ETL Code"):
-                etl_code = agents.etl_agent.execute_task(
-                    metadata=source_metadata_df,
-                    target_metadata=target_metadata_df,
-                    target_platform=target_platform
+                agents = Agents(
+                    llm_option=st.session_state.llm_option,
+                    all_metadata_dfs=all_metadata_dfs,
+                    source_metadata_df=source_metadata_df,
+                    target_metadata_df=target_metadata_df,
+                    mapping_metadata_df=mapping_metadata_df,
+                    etl_metadata_df=etl_metadata_df,
+                    data_quality_rules_df=data_quality_rules_df,
+                    security_compliance_df=security_compliance_df,
+                    target_platform=st.session_state.target_platform,
                 )
-                etl_file_name = f"{metadata_base}-etl_job.py"
-                etl_path = os.path.join(etl_dir, etl_file_name)
-                with open(etl_path, "w") as f:
-                    f.write(etl_code)
-                st.session_state.etl_generated = etl_path
-                st.session_state.scroll_to_output = True
+                result = agents.run()
+                st.session_state.etl_generated = result
 
-            if st.session_state.get("etl_generated") and st.button("✅ Generate DQ Tests"):
-                dq_tests = agents.dq_agent.execute_task(
-                    metadata=data_quality_rules_df,
-                    llm_option=llm_option
-                )
-                dq_file_name = f"{metadata_base}-test_dq.py"
-                dq_path = os.path.join(tests_dir, dq_file_name)
-                with open(dq_path, "w") as f:
-                    f.write(dq_tests)
-                st.session_state.dq_generated = dq_path
-                st.session_state.scroll_to_output = True
-
-            if st.session_state.get("dq_generated") and st.button("📈 Generate Lineage JSON"):
-                lineage_json = agents.lineage_agent.execute_task(
-                    metadata=mapping_metadata_df,
-                    llm_option=llm_option
-                )
-                lineage_file_name = f"{metadata_base}-lineage.json"
-                lineage_path = os.path.join(metadata_dir, lineage_file_name)
-                with open(lineage_path, "w") as f:
-                    f.write(lineage_json)
-                st.session_state.lineage_generated = lineage_path
-                st.session_state.scroll_to_output = True
-
-        # Show generated outputs
         st.markdown('<div id="preview-start"></div>', unsafe_allow_html=True)
         scroll_script = """
         <script>
@@ -101,14 +81,12 @@ def main():
         """
         if st.session_state.get("scroll_to_output"):
             st.markdown(scroll_script, unsafe_allow_html=True)
-            st.session_state.scroll_to_output = False
+        st.session_state.scroll_to_output = False
+
         with right_col:
-            if etl_path := st.session_state.get("etl_generated"):
+            if st.session_state.get("etl_generated"):
                 with st.expander("🧾 Generated ETL Code", expanded=True):
-                    with open(etl_path) as f:
-                        content = f.read()
-                        st.code(content, language="python")
-                        st.download_button("⬇️ Download ETL Script", content, file_name=os.path.basename(etl_path))
+                    st.write(st.session_state.etl_generated)
 
             if dq_path := st.session_state.get("dq_generated"):
                 with st.expander("🧪 Data Quality Tests", expanded=True):

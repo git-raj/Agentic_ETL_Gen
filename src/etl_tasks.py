@@ -1,11 +1,30 @@
+import re
+
 def generate_etl_code(source_metadata, target_metadata, target_platform, llm_option):
     """
     Generates PySpark code for ETL based on the provided metadata and target platform.
     """
     print("Generating ETL code...")
 
-    source_table = source_metadata['Source Table Name'].dropna().unique()[0]
-    target_table = target_metadata['Target Table Name'].dropna().unique()[0]
+    if source_metadata.empty:
+        return "Error: Source metadata is empty."
+    if target_metadata.empty:
+        return "Error: Target metadata is empty."
+
+    if 'Source Table Name' not in source_metadata.columns:
+        return "Error: 'Source Table Name' column not found in source metadata."
+    if 'Target Table Name' not in target_metadata.columns:
+        return "Error: 'Target Table Name' column not found in target metadata."
+
+    source_table_names = source_metadata['Source Table Name'].dropna().unique()
+    if len(source_table_names) == 0:
+        return "Error: No non-null 'Source Table Name' found in source metadata."
+    target_table_names = target_metadata['Target Table Name'].dropna().unique()
+    if len(target_table_names) == 0:
+        return "Error: No non-null 'Target Table Name' found in target metadata."
+
+    source_table = source_table_names[0]
+    target_table = target_table_names[0]
 
     transformation_lines = []
     for _, row in target_metadata.iterrows():
@@ -15,8 +34,17 @@ def generate_etl_code(source_metadata, target_metadata, target_platform, llm_opt
         if not target_col:
             continue
 
+        # Extract source column name from transformation logic
+        match = re.search(r"Direct mapping from (.*)", transformation)
+        if match:
+            source_col = match.group(1)
+            transformation = f'source_df["{source_col}"]'
+        else:
+            transformation = 'source_df["<source_col>"]'  # Default transformation
+
         line = f'    target_df = target_df.withColumn("{target_col}", {transformation})'
         transformation_lines.append(line)
+    print(f"Transformation lines: {transformation_lines}")
 
     # Platform-specific setup
     if target_platform == "Databricks":

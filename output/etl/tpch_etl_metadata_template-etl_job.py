@@ -18,9 +18,9 @@ def main():
     target_df = source_df
 
     # Apply transformations
-    target_df = target_df.withColumn("customer_id", Direct mapping from c_custkey)
-    target_df = target_df.withColumn("customer_name", Direct mapping from c_name)
-    target_df = target_df.withColumn("order_id", Direct mapping from o_orderkey)
+    target_df = target_df.withColumn("customer_id", source_df["c_custkey"])
+    target_df = target_df.withColumn("customer_name", source_df["c_name"])
+    target_df = target_df.withColumn("order_id", source_df["o_orderkey"])
 
     # Write target data
     glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(target_df, glueContext, "target"), connection_type="s3", connection_options={"path": "s3://your-bucket/customer"}, format="parquet")
