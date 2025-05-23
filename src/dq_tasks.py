@@ -1,44 +1,55 @@
-def generate_data_quality_tests(metadata, llm_option):
+def generate_dq_tests(metadata, llm, use_agentic=False):
     """
-    Generates Great Expectations + PyTest-based validation tests based on the provided metadata.
+    Generates Great Expectations + PyTest-based validation tests from metadata.
+    Falls back to canned rule generation unless use_agentic is True.
     """
+    if use_agentic:
+        # Placeholder for LLM-generated expectations
+        return llm.invoke([
+            {"role": "user", "content": "Generate PyTest+GreatExpectations DQ tests from the following metadata:\n" + metadata.to_csv(index=False)}
+        ]).content
+
     import_text = [
         "import pytest",
         "from great_expectations.dataset import SparkDFDataset"
     ]
-
     expectations = []
 
     for _, row in metadata.iterrows():
-        validation = row.get('Validations')
-        reject_handling = row.get('Reject Handling', '')
-        column_name = row.get('Column Name') or validation  # fallback to validation field
+        validation = str(row.get('Validations', '')).strip()
+        column_name = str(row.get('Column Name', '')).strip()
 
-        if validation and isinstance(validation, str):
-            if validation.lower() == "not null":
+        if not column_name and validation:
+            column_name = validation  # fallback
+
+        if not validation or not column_name:
+            continue
+
+        rule = validation.lower()
+
+        if rule == "not null":
+            expectations.append(
+                f'    dataset.expect_column_values_to_not_be_null("{column_name}")'
+            )
+        elif rule.startswith("range"):
+            try:
+                bounds = rule.split("(")[1].split(")")[0].split(",")
+                min_val, max_val = bounds[0].strip(), bounds[1].strip()
                 expectations.append(
-                    f'    dataset.expect_column_values_to_not_be_null("{column_name}")'
+                    f'    dataset.expect_column_values_to_be_between("{column_name}", min_value={min_val}, max_value={max_val})'
                 )
-            elif validation.lower().startswith("range"):
-                # Example format: Range(1,100)
-                try:
-                    bounds = validation.split("(")[1].split(")")[0].split(",")
-                    min_val, max_val = bounds[0].strip(), bounds[1].strip()
-                    expectations.append(
-                        f'    dataset.expect_column_values_to_be_between("{column_name}", min_value={min_val}, max_value={max_val})'
-                    )
-                except:
-                    expectations.append(f"    # Invalid range format: {validation}")
-            elif validation.lower().startswith("regex"):
-                try:
-                    pattern = validation.split("(")[1].split(")")[0]
-                    expectations.append(
-                        f'    dataset.expect_column_values_to_match_regex("{column_name}", "{pattern}")'
-                    )
-                except:
-                    expectations.append(f"    # Invalid regex format: {validation}")
-            else:
-                expectations.append(f"    # Unsupported validation rule: {validation}")
+            except Exception:
+                expectations.append(f"    # Invalid range format: {validation}")
+        elif rule.startswith("regex"):
+            try:
+                pattern = rule.split("(")[1].split(")")[0]
+                expectations.append(
+                    f'    dataset.expect_column_values_to_match_regex("{column_name}", "{pattern}")'
+                )
+            except Exception:
+                expectations.append(f"    # Invalid regex format: {validation}")
+        else:
+            expectations.append(f"    # Unsupported validation rule: {validation}")
 
     test_code = f"""
 {chr(10).join(import_text)}

@@ -4,6 +4,7 @@ import os
 import json
 from dotenv import load_dotenv
 from agents import Agents
+from llm_utils import get_llm_instance
 
 def main():
     st.set_page_config(page_title="ETL Automation Studio", layout="wide")
@@ -11,7 +12,6 @@ def main():
 
     load_dotenv(dotenv_path=".env")
 
-    # Right pane only
     _, right_col = st.columns([0.01, 1.99])
 
     with st.sidebar:
@@ -19,8 +19,13 @@ def main():
         metadata_file = st.file_uploader("📁 Upload ETL Metadata Spreadsheet", type=["xlsx"])
         llm_option = st.selectbox("🤖 Select LLM", ["OpenAI", "Google Gemini", "Other"])
         st.session_state.llm_option = llm_option
+        llm_instance = get_llm_instance(llm_option)
+        st.session_state.llm_instance = llm_instance
+
         target_platform = st.selectbox("🎯 Select Target Platform", ["Databricks", "EMR", "AWS Glue"], index=0)
         st.session_state.target_platform = target_platform
+
+        use_agentic = st.checkbox("🤖 Use Agentic LLM-based Generation", value=False)
 
     if metadata_file:
         excel_file = pd.ExcelFile(metadata_file)
@@ -32,18 +37,11 @@ def main():
                 selected_sheet = st.selectbox("Select sheet to preview", sheet_names)
                 st.dataframe(excel_file.parse(selected_sheet), use_container_width=True)
 
-        # Parse all sheets into a dictionary of DataFrames
-        all_metadata_dfs = {}
-        for sheet_name in sheet_names:
-            all_metadata_dfs[sheet_name] = excel_file.parse(sheet_name)
+        all_metadata_dfs = {sheet: excel_file.parse(sheet) for sheet in sheet_names}
 
-        # Retrieve specific DataFrames for convenience and for agents that directly use them
         source_metadata_df = all_metadata_dfs.get("Source Metadata", pd.DataFrame())
         target_metadata_df = all_metadata_dfs.get("Target Metadata", pd.DataFrame())
         mapping_metadata_df = all_metadata_dfs.get("Mapping Metadata", pd.DataFrame())
-        etl_metadata_df = all_metadata_dfs.get("ETL Metadata", pd.DataFrame())
-        data_quality_rules_df = all_metadata_dfs.get("Data Quality Rules", pd.DataFrame())
-        security_compliance_df = all_metadata_dfs.get("Security & Compliance", pd.DataFrame())
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         output_dir = os.path.join(base_dir, "output")
@@ -56,19 +54,28 @@ def main():
 
         with st.sidebar:
             if st.button("🛠️ Generate ETL Code"):
-                agents = Agents(
-                    llm_option=st.session_state.llm_option,
-                    all_metadata_dfs=all_metadata_dfs,
+                agents = Agents(llm=st.session_state.llm_instance)
+                results = agents.run(
                     source_metadata_df=source_metadata_df,
                     target_metadata_df=target_metadata_df,
                     mapping_metadata_df=mapping_metadata_df,
-                    etl_metadata_df=etl_metadata_df,
-                    data_quality_rules_df=data_quality_rules_df,
-                    security_compliance_df=security_compliance_df,
                     target_platform=st.session_state.target_platform,
+                    use_agentic=use_agentic
                 )
-                result = agents.run()
-                st.session_state.etl_generated = result
+
+                # Save and update session state
+                st.session_state.etl_generated = results.get("etl")
+                st.session_state.dq_generated = os.path.join(tests_dir, "dq_tests.py")
+                st.session_state.lineage_generated = os.path.join(metadata_dir, "lineage.json")
+
+                if results.get("dq"):
+                    with open(st.session_state.dq_generated, "w") as f:
+                        f.write(results["dq"])
+                if results.get("lineage"):
+                    with open(st.session_state.lineage_generated, "w") as f:
+                        f.write(results["lineage"])
+
+                st.success("✅ Code generation completed.")
 
         st.markdown('<div id="preview-start"></div>', unsafe_allow_html=True)
         scroll_script = """
@@ -86,7 +93,7 @@ def main():
         with right_col:
             if st.session_state.get("etl_generated"):
                 with st.expander("🧾 Generated ETL Code", expanded=True):
-                    st.write(st.session_state.etl_generated)
+                    st.code(st.session_state.etl_generated, language="python")
 
             if dq_path := st.session_state.get("dq_generated"):
                 with st.expander("🧪 Data Quality Tests", expanded=True):

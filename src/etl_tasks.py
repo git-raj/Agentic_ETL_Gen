@@ -1,6 +1,6 @@
 import re
 
-def generate_etl_code(source_metadata, target_metadata, target_platform, llm_option):
+def generate_etl_code(source_metadata, target_metadata, target_platform, llm, use_agentic=False):
     """
     Generates PySpark code for ETL based on the provided metadata and target platform.
     """

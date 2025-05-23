@@ -1,0 +1,68 @@
+{
+  "codeGraph": {
+    "nodes": [
+      {
+        "id": "c.c_custkey",
+        "type": "Column",
+        "name": "c_custkey",
+        "parent": {
+          "id": "c",
+          "type": "Table",
+          "name": "c"
+        }
+      },
+      {
+        "id": "customer.customer",
+        "type": "Column",
+        "name": "customer",
+        "parent": {
+          "id": "customer",
+          "type": "Table",
+          "name": "customer"
+        }
+      },
+      {
+        "id": "o.o_orderkey",
+        "type": "Column",
+        "name": "o_orderkey",
+        "parent": {
+          "id": "o",
+          "type": "Table",
+          "name": "o"
+        }
+      },
+      {
+        "id": "order.order",
+        "type": "Column",
+        "name": "order",
+        "parent": {
+          "id": "order",
+          "type": "Table",
+          "name": "order"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_0",
+        "source": "c.c_custkey",
+        "target": "customer.customer",
+        "label": "customer_id = c_custkey",
+        "transformation": "customer_id = c_custkey"
+      },
+      {
+        "id": "edge_1",
+        "source": "o.o_orderkey",
+        "target": "order.order",
+        "label": "order_id = o_orderkey",
+        "transformation": "order_id = o_orderkey"
+      }
+    ]
+  },
+  "sourceProperties": [],
+  "targetProperties": [],
+  "script": {
+    "codeFormat": "python",
+    "placeholder": "# Transformation logic not provided"
+  }
+}

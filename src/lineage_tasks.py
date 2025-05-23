@@ -2,14 +2,12 @@ import json
 import pandas as pd
 import re
 
-def generate_lineage_json(mapping_metadata, llm_option):
+def generate_lineage_json(mapping_metadata, llm, use_agentic=False):
     """
     Generates a Collibra-compliant lineage JSON document based on the provided mapping metadata.
     Tries to infer source/target table and column names from the 'Business Rule / Expression' field if not explicitly defined.
     """
     print("Generating lineage JSON...")
-    # print("Columns in DataFrame:", mapping_metadata.columns.tolist())
-    # print("First 3 rows:", mapping_metadata.head(3).to_dict())
 
     nodes = []
     edges = []
