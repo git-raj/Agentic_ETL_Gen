@@ -26,6 +26,19 @@ def main():
         st.session_state.target_platform = target_platform
 
         use_agentic = st.checkbox("🤖 Use Agentic LLM-based Generation", value=False)
+        
+        # New Airflow Generation Options
+        st.header("🛫 Airflow DAG Generation")
+        generate_airflow_dag = st.checkbox("Generate Airflow DAG", value=False)
+        if generate_airflow_dag:
+            airflow_generation_mode = st.radio(
+                "Airflow DAG Generation Mode", 
+                ["LLM-Based", "Template-Based"], 
+                index=0
+            )
+            st.session_state.airflow_generation_mode = airflow_generation_mode.lower().replace('-', '_')
+        else:
+            st.session_state.airflow_generation_mode = None
 
     if metadata_file:
         excel_file = pd.ExcelFile(metadata_file)
@@ -48,19 +61,27 @@ def main():
         etl_dir = os.path.join(output_dir, "etl")
         metadata_dir = os.path.join(output_dir, "metadata")
         tests_dir = os.path.join(output_dir, "tests")
+        airflow_dir = os.path.join(output_dir, "airflow")
         os.makedirs(etl_dir, exist_ok=True)
         os.makedirs(metadata_dir, exist_ok=True)
         os.makedirs(tests_dir, exist_ok=True)
+        os.makedirs(airflow_dir, exist_ok=True)
 
         with st.sidebar:
             if st.button("🛠️ Generate ETL Code"):
                 agents = Agents(llm=st.session_state.llm_instance)
+                
+                # Prepare ETL script path for Airflow DAG generation
+                etl_script_path = os.path.join(etl_dir, f"{metadata_base}-etl_job.py")
+                
                 results = agents.run(
                     source_metadata_df=source_metadata_df,
                     target_metadata_df=target_metadata_df,
                     mapping_metadata_df=mapping_metadata_df,
                     target_platform=st.session_state.target_platform,
-                    use_agentic=use_agentic
+                    use_agentic=use_agentic,
+                    etl_script=etl_script_path,
+                    airflow_generation_mode=st.session_state.get('airflow_generation_mode', 'template')
                 )
 
                 st.session_state.etl_generated = results.get("etl")
@@ -68,7 +89,7 @@ def main():
                 st.session_state.lineage_generated = os.path.join(metadata_dir, f"{metadata_base}-lineage.json")
 
                 if results.get("etl"):
-                    st.session_state.etl_path = os.path.join(etl_dir, f"{metadata_base}-etl_job.py")
+                    st.session_state.etl_path = etl_script_path
                     with open(st.session_state.etl_path, "w") as f:
                         f.write(results["etl"])
 
@@ -79,6 +100,12 @@ def main():
                 if results.get("lineage"):
                     with open(st.session_state.lineage_generated, "w") as f:
                         f.write(results["lineage"])
+
+                # Airflow DAG Generation
+                if results.get("airflow_dag"):
+                    st.session_state.airflow_dag_path = os.path.join(airflow_dir, f"{metadata_base}_dag.py")
+                    with open(st.session_state.airflow_dag_path, "w") as f:
+                        f.write(results["airflow_dag"])
 
                 st.success("✅ Code generation completed.")
 
@@ -116,6 +143,14 @@ def main():
                         content = f.read()
                         st.json(json.loads(content))
                         st.download_button("⬇️ Download Lineage JSON", content, file_name=os.path.basename(lineage_path))
+
+            # New Airflow DAG Preview
+            if airflow_dag_path := st.session_state.get("airflow_dag_path"):
+                with st.expander("🛫 Generated Airflow DAG", expanded=True):
+                    with open(airflow_dag_path) as f:
+                        content = f.read()
+                        st.code(content, language="python")
+                        st.download_button("⬇️ Download Airflow DAG", content, file_name=os.path.basename(airflow_dag_path))
 
             if st.session_state.get("lineage_generated"):
                 st.success(f"🎉 All outputs saved to: {output_dir}")
