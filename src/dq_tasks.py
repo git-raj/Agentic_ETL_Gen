@@ -3,6 +3,7 @@ def generate_dq_tests(metadata, llm, use_agentic=False):
     Generates Great Expectations + PyTest-based validation tests from metadata.
     Falls back to canned rule generation unless use_agentic is True.
     """
+    print("Generating Data Quality QA code...")
     if use_agentic:
         # Placeholder for LLM-generated expectations
         return llm.invoke([

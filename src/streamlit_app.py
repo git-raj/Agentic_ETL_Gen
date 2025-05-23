@@ -63,14 +63,19 @@ def main():
                     use_agentic=use_agentic
                 )
 
-                # Save and update session state
                 st.session_state.etl_generated = results.get("etl")
                 st.session_state.dq_generated = os.path.join(tests_dir, f"{metadata_base}-dq_tests.py")
                 st.session_state.lineage_generated = os.path.join(metadata_dir, f"{metadata_base}-lineage.json")
 
+                if results.get("etl"):
+                    st.session_state.etl_path = os.path.join(etl_dir, f"{metadata_base}-etl_job.py")
+                    with open(st.session_state.etl_path, "w") as f:
+                        f.write(results["etl"])
+
                 if results.get("dq"):
                     with open(st.session_state.dq_generated, "w") as f:
                         f.write(results["dq"])
+
                 if results.get("lineage"):
                     with open(st.session_state.lineage_generated, "w") as f:
                         f.write(results["lineage"])
@@ -91,9 +96,12 @@ def main():
         st.session_state.scroll_to_output = False
 
         with right_col:
-            if st.session_state.get("etl_generated"):
+            if etl_path := st.session_state.get("etl_path"):
                 with st.expander("🧾 Generated ETL Code", expanded=True):
-                    st.code(st.session_state.etl_generated, language="python")
+                    with open(etl_path) as f:
+                        content = f.read()
+                        st.code(content, language="python")
+                        st.download_button("⬇️ Download ETL Code", content, file_name=os.path.basename(etl_path))
 
             if dq_path := st.session_state.get("dq_generated"):
                 with st.expander("🧪 Data Quality Tests", expanded=True):

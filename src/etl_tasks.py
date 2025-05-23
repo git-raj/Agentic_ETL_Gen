@@ -1,111 +1,123 @@
 import re
+import json
+import traceback
+import textwrap
 
-#TODO need LLM generate cde based on source, target and mapping.
 def generate_etl_code(source_metadata, target_metadata, target_platform, llm, use_agentic=False, mapping_metadata=None, dq_metadata=None):
     """
-    Generates complete PySpark code for ETL based on metadata.
+    Generates complete PySpark code for ETL based on metadata using LLM.
     Includes transformation rules, data quality filters, and error segregation.
     """
+    print("Generating ETL code...")
     if source_metadata.empty or target_metadata.empty:
         return "Error: Missing source or target metadata."
 
-    source_table = source_metadata['Source Table Name'].dropna().unique()[0]
-    target_table = target_metadata['Target Table Name'].dropna().unique()[0]
-    target_table_rejected = f"{target_table}_rejected"
-
-    # Build transformation logic from Mapping Metadata
-    transformation_lines = []
-    filter_conditions = []
-    join_conditions = []
+    transformation_logic = ""
     if mapping_metadata is not None:
-        for _, row in mapping_metadata.iterrows():
-            expr = str(row.get('Business Rule / Expression', '')).strip()
-            if '=' in expr:
-                target_col, logic = [x.strip() for x in expr.split('=', 1)]
-                transformation_lines.append(f'    df = df.withColumn("{target_col}", {logic})')
-            if row.get("Filter Conditions"):
-                filter_conditions.append(row["Filter Conditions"])
-            if row.get("Join Conditions"):
-                join_conditions.append(row["Join Conditions"])
+        try:
+            mapping_dict = mapping_metadata[[
+                "Business Rule / Expression",
+                "Join Conditions",
+                "Filter Conditions",
+                "Lookup Table Used",
+                "Aggregation Rule"
+            ]].dropna(how="all").to_dict(orient="records")
 
-    dq_checks = []
-    quarantine_conditions = []
+            source_dict = source_metadata.to_dict(orient="records")
+            target_dict = target_metadata.to_dict(orient="records")
+
+            prompt = f"""
+You are a senior data engineer. Use the following metadata to generate PySpark ETL code:
+
+- Source Metadata:
+{json.dumps(source_dict, indent=2)}
+
+- Target Metadata:
+{json.dumps(target_dict, indent=2)}
+
+- Mapping Instructions:
+{json.dumps(mapping_dict, indent=2)}
+
+Generate a Python function `transform_data(customer_df, order_df)` that applies the transformations, joins, filters, lookup logic, and aggregations.
+Ensure code readability with comments explaining each block.
+Return a dictionary of output DataFrames by logical table name.
+"""
+            response = llm.invoke([{"role": "user", "content": prompt}])
+            transformation_logic = textwrap.indent(response.content.strip(), '    ')
+        except Exception as e:
+            print(f"Error: Failed to generate transformation logic using LLM: {e}")
+
+    data_quality_checks = ""
     if dq_metadata is not None:
-        for _, rule in dq_metadata.iterrows():
-            validation = str(rule.get("Validations", "")).strip().lower()
-            action = str(rule.get("Reject Handling", "")).strip().lower()
-            col = rule.get("Column Name", "").strip()
+        try:
+            dq_dict = dq_metadata[[
+                "Validations",
+                "Reject Handling",
+                "Record Count Expected"
+            ]].dropna(how="all").to_dict(orient="records")
 
-            if not col:
-                continue
+            dq_prompt = f"""
+You are an expert data quality analyst. Generate PySpark code to perform the following data quality checks:
+{json.dumps(dq_dict, indent=2)}
 
-            if validation == "not null":
-                condition = f"df['{col}'].isNotNull()"
-            elif validation.startswith("range"):
-                try:
-                    bounds = validation.split("(")[1].split(")")[0].split(',')
-                    min_val, max_val = bounds[0].strip(), bounds[1].strip()
-                    condition = f"(df['{col}'] >= {min_val}) & (df['{col}'] <= {max_val})"
-                except Exception:
-                    continue
-            else:
-                continue
-
-            dq_checks.append(condition)
-            if action == "quarantine":
-                quarantine_conditions.append(condition)
-
-    dq_expression = " & ".join(quarantine_conditions) if quarantine_conditions else "True"
-
-    # Platform setup
-    if target_platform == "Databricks":
-        platform_setup = """
-    # Databricks-specific setup
-    spark.conf.set("spark.databricks.io.cache.enabled", "true")
+Return a Python function `data_quality_checks(spark, df, table_name)` that:
+- Applies validation rules
+- Implements reject handling strategies
+- Validates against expected record counts (thresholds)
+- Returns cleaned_df, quarantine_df, and record_count_valid (boolean)
+Include comments for each check and action.
 """
-        write_valid = f'df_valid.write.format("delta").mode("overwrite").saveAsTable("{target_table}")'
-        write_invalid = f'df_invalid.write.format("delta").mode("overwrite").saveAsTable("{target_table_rejected}")'
-
-    elif target_platform == "AWS Glue":
-        platform_setup = """
-    # AWS Glue-specific setup
-    from awsglue.context import GlueContext
-    from awsglue.utils import getResolvedOptions
-    glueContext = GlueContext(spark.sparkContext)
-"""
-        write_valid = f'glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(df_valid, glueContext, "target"), connection_type="s3", connection_options={{"path": "s3://your-bucket/{target_table}"}}, format="parquet")'
-        write_invalid = f'glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(df_invalid, glueContext, "rejected"), connection_type="s3", connection_options={{"path": "s3://your-bucket/{target_table_rejected}"}}, format="parquet")'
-
-    else:
-        platform_setup = "    # Generic Spark setup"
-        write_valid = f'df_valid.write.mode("overwrite").saveAsTable("{target_table}")'
-        write_invalid = f'df_invalid.write.mode("overwrite").saveAsTable("{target_table_rejected}")'
+            response = llm.invoke([{"role": "user", "content": dq_prompt}])
+            data_quality_checks = textwrap.indent(response.content.strip(), '    ')
+        except Exception as e:
+            print(f"Error: Failed to generate data quality checks using LLM: {e}")
 
     pyspark_code = f"""
-from pyspark.sql import SparkSession
+# ETL Code Generated by Agentic ETL Generator
 
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lit
+
+def transform_data(customer_df, order_df):
+{transformation_logic if transformation_logic else '    # No transformation logic generated'}
+
+def data_quality_checks(spark, df, table_name):
+{data_quality_checks if data_quality_checks else '    # No data quality checks generated'}
 
 def main():
     spark = SparkSession.builder.appName("ETL Job").getOrCreate()
-{platform_setup}
 
-    df = spark.table("{source_table}")
+    customer_df = spark.read.csv("path/to/customer.csv", header=True, inferSchema=True)
+    order_df = spark.read.csv("path/to/orders.csv", header=True, inferSchema=True)
 
-    # Transformations
-{chr(10).join(transformation_lines)}
+    transformed_data = transform_data(customer_df, order_df)
 
-    # Data Quality Checks & Quarantine
-    df_valid = df.filter({dq_expression})
-    df_invalid = df.subtract(df_valid)
+    for table_name, df in transformed_data.items():
+        cleaned_df, quarantine_df, record_count_valid = data_quality_checks(spark, df, table_name)
 
-    # Write outputs
-    {write_valid}
-    {write_invalid}
+        if cleaned_df is not None and record_count_valid:
+            cleaned_df.write.mode("overwrite").saveAsTable(f"target_{{table_name}}")
+        if quarantine_df is not None:
+            quarantine_df.write.mode("append").saveAsTable("quarantine_records")
 
     spark.stop()
 
 if __name__ == "__main__":
     main()
 """
+
+    try:
+        optimization_prompt = f"""
+You are an expert PySpark engineer. Optimize the following PySpark code for running on {target_platform}:
+
+{pyspark_code}
+
+Make any platform-specific changes, especially around session creation, I/O, and performance best practices.
+Return only the optimized Python code.
+"""
+        response = llm.invoke([{"role": "user", "content": optimization_prompt}])
+        pyspark_code = response.content.strip()
+    except Exception as e:
+        print(f"Warning: Could not optimize for {target_platform}. Returning base code. Error: {e}")
 
     return pyspark_code

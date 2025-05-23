@@ -1,136 +1,119 @@
 **How to Use the ETL Metadata Spreadsheet for Data Engineering Projects**
 
-This document outlines how to effectively use the ETL metadata spreadsheet to plan, communicate, and implement ETL processes between source systems and a data warehouse such as Snowflake. The spreadsheet is designed for use by business analysts, data modelers, and ETL developers.
+This guide helps business analysts, data modelers, engineers, and LLM agents use the metadata spreadsheet effectively for automated ETL code generation, data quality validation, and lineage reporting.
 
 ---
 
 ### 📄 Spreadsheet Overview
 
-The spreadsheet is composed of multiple tabs, each representing a critical category of metadata necessary for building a complete and robust ETL pipeline. Below are the key tabs and their purposes:
+The spreadsheet contains these key tabs:
 
 ---
 
 ### 1. **Source Metadata**
-
-This tab captures the structure of the source data.
+Describes the structure of source systems.
 
 | Column             | Purpose                                                   |
-| ------------------ | --------------------------------------------------------- |
-| Source System Name | Name of the source application or database.               |
-| Source Table Name  | The name of the source table/file.                        |
-| Source Column Name | Column name as it exists in the source system.            |
-| Data Type          | Data type in the source system.                           |
-| Nullable           | Indicates if the column can be NULL.                      |
-| Primary Key?       | Identifies primary keys for uniquely identifying records. |
-| Default Value      | Default values, if any.                                   |
-| Comments           | Additional info or business definition.                   |
-
-**Instructions**: Fill this out based on your source system’s schema.
+|--------------------|-----------------------------------------------------------|
+| Source System Name | Source DB or app name                                     |
+| Source Table Name  | Source table or file name                                 |
+| Source Column Name | Actual field name in source                               |
+| Data Type          | Source column data type                                   |
+| Nullable           | Whether NULL is allowed                                   |
+| Primary Key?       | Flags primary key columns                                 |
+| Default Value      | Default/fallback values                                   |
+| Comments           | Business notes or transformations                         |
 
 ---
 
 ### 2. **Target Metadata**
+Captures intended structure in the data warehouse.
 
-This tab defines the structure of the target table in the data warehouse.
-
-| Column                    | Purpose                                                    |
-| ------------------------- | ---------------------------------------------------------- |
-| Target System             | Destination system (e.g., Snowflake).                      |
-| Target Schema             | Schema name in the target system.                          |
-| Target Table Name         | Final table name for loading data.                         |
-| Target Column Name        | Target column name, possibly renamed.                      |
-| Target Data Type          | Data type in the destination system.                       |
-| Transformation Logic      | Description of transformation from source to target.       |
-| Is Derived?               | Indicates whether the column is derived from other fields. |
-| Load Order / Priority     | Helps plan the load sequence of tables.                    |
-| Partition Key?            | Flag for partition column in target table.                 |
-| Hash Key or Business Key? | Used in Data Vault modeling or for identifying records.    |
-
-**Instructions**: Data modelers or solution architects should fill this out in conjunction with developers.
+| Column                    | Purpose                                                 |
+|---------------------------|---------------------------------------------------------|
+| Target System             | E.g., Snowflake                                         |
+| Target Schema             | Namespace for tables                                    |
+| Target Table Name         | Target table name                                       |
+| Target Column Name        | Final column name                                       |
+| Target Data Type          | Column data type                                        |
+| Transformation Logic      | Description of logic to convert source to target        |
+| Is Derived?               | If derived from other columns                           |
+| Load Order / Priority     | Load sequence planning                                  |
+| Partition Key?            | Whether this column is used for partitioning            |
+| Hash Key or Business Key? | For vault modeling or key generation                    |
 
 ---
 
 ### 3. **Mapping Metadata**
+Provides detailed logic for transformation.
 
-Defines how data should be transformed or joined between source and target.
-
-| Column                     | Purpose                                          |
-| -------------------------- | ------------------------------------------------ |
-| Mapping Rule ID            | Unique ID for traceability.                      |
-| Business Rule / Expression | Logic to apply for transformation or derivation. |
-| Lookup Table Used          | If transformation involves a lookup.             |
-| Filter Conditions          | Conditions to apply on source data.              |
-| Join Conditions            | If the data is joined across multiple tables.    |
-| Aggregation Rule           | If the data needs to be aggregated.              |
-
-**Instructions**: Should be collaboratively defined with data analysts and developers.
+| Column                     | Purpose                                                  |
+|----------------------------|----------------------------------------------------------|
+| Mapping Rule ID            | Unique ID for traceability                               |
+| Business Rule / Expression | Expression for derived/calculated fields                 |
+| Lookup Table Used          | If logic involves a lookup from another table            |
+| Filter Conditions          | Row-level filters or predicates                          |
+| Join Conditions            | Logic to join with other sources                         |
+| Aggregation Rule           | If aggregation is needed (e.g., SUM, MAX, GROUP BY)      |
 
 ---
 
 ### 4. **ETL Metadata**
+ETL execution configuration.
 
-Captures ETL-specific instructions and operational behavior.
-
-| Column                   | Purpose                                          |
-| ------------------------ | ------------------------------------------------ |
-| Load Frequency           | Daily, Weekly, etc.                              |
-| Incremental or Full Load | Type of data load.                               |
-| Watermark Column         | Column used to identify new or changed records.  |
-| Source File Pattern      | For file-based sources.                          |
-| Error Handling Logic     | Strategy for dealing with bad data.              |
-| Pre/Post Load Script     | Any DDL or DML scripts to run before/after load. |
-| ETL Job Owner            | Owner or point of contact.                       |
-| Dependencies             | Order in which tables should load.               |
-
-**Instructions**: Typically filled out by ETL developers or data engineers.
+| Column                   | Purpose                                                |
+|--------------------------|--------------------------------------------------------|
+| Load Frequency           | Daily, weekly, monthly                                 |
+| Incremental or Full Load | How records are reloaded                               |
+| Watermark Column         | Used for incremental loads                             |
+| Source File Pattern      | Wildcard patterns for S3/files                          |
+| Error Handling Logic     | Quarantine/log/drop strategy                           |
+| Pre/Post Load Script     | Scripts to run before or after job                     |
+| ETL Job Owner            | Owner or SME contact                                   |
+| Dependencies             | Job/table dependencies                                 |
 
 ---
 
 ### 5. **Data Quality Rules**
+Column-level validation logic.
 
-Helps enforce data quality.
-
-| Column                | Purpose                                                    |
-| --------------------- | ---------------------------------------------------------- |
-| Validations           | Examples: Not Null, Range Checks, Regex Patterns.          |
-| Reject Handling       | What to do if validation fails (quarantine, discard, log). |
-| Record Count Expected | Optional expected volume thresholds.                       |
-
-**Instructions**: Add checks that are important for trust in data.
+| Column                | Purpose                                                         |
+|-----------------------|-----------------------------------------------------------------|
+| Validations           | Not Null, Range(min,max), Regex(pattern)                        |
+| Reject Handling       | Action if validation fails (quarantine/log/discard)             |
+| Record Count Expected | Optional row count threshold                                    |
 
 ---
 
 ### 6. **Security & Compliance**
+Captures governance intent.
 
-Used for ensuring data governance.
-
-| Column              | Purpose                         |
-| ------------------- | ------------------------------- |
-| PII/PHI Flag        | Flags sensitive fields.         |
-| Masking Required    | Mask in reports or logs?        |
-| Encryption Required | Required in transit or at rest? |
-
-**Instructions**: Coordinate with compliance and security teams.
+| Column              | Purpose                                   |
+|---------------------|-------------------------------------------|
+| PII/PHI Flag        | Mark sensitive data                       |
+| Masking Required    | Whether to mask the value in outputs      |
+| Encryption Required | Whether encryption is required            |
 
 ---
 
-### 🔄 Workflow
+### 🔄 Workflow Summary
 
-1. **Business Analyst**: Begins by filling out source and mapping logic.
-2. **Data Modeler**: Designs the target model and fills out the target tab.
-3. **ETL Developer**: Reviews the entire document to implement the ETL pipeline.
-4. **QA/Data Governance**: Reviews DQ rules and compliance settings.
+1. **Business Analyst**: Starts with Source + Mapping + Rules
+2. **Data Modeler**: Fills Target Metadata + ETL configuration
+3. **ETL Developer**: Uses all sheets to generate logic + testing
+4. **LLM Agent**: Automatically reads and transforms the metadata
+5. **QA/Data Governance**: Reviews DQ and compliance logic
 
 ---
 
 ### ✅ Best Practices
 
-* Keep naming conventions consistent.
-* Add versioning if shared across teams.
-* Use data dictionary references for shared terms.
-* Mark optional vs. required fields.
-* Validate the sheet before development starts.
+- Use consistent table/column names across tabs
+- Keep expressions readable for LLMs (avoid vague references)
+- Validate sheet format before uploading
+- Use version control (e.g., `v2`, `draft`, `final`) in filename
+- Prefer separate records for each transformation rule in Mapping tab
 
 ---
 
-For questions or collaboration, share the document with stakeholders early in the process.
+This sheet is your contract between humans and AI agents for building production-grade ETL jobs.
