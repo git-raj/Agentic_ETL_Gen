@@ -65,8 +65,8 @@ def main():
 
                 # Save and update session state
                 st.session_state.etl_generated = results.get("etl")
-                st.session_state.dq_generated = os.path.join(tests_dir, "dq_tests.py")
-                st.session_state.lineage_generated = os.path.join(metadata_dir, "lineage.json")
+                st.session_state.dq_generated = os.path.join(tests_dir, f"{metadata_base}-dq_tests.py")
+                st.session_state.lineage_generated = os.path.join(metadata_dir, f"{metadata_base}-lineage.json")
 
                 if results.get("dq"):
                     with open(st.session_state.dq_generated, "w") as f:

@@ -1,4 +1,4 @@
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from dotenv import load_dotenv
@@ -8,7 +8,6 @@ def get_llm_instance(llm_option: str):
     if llm_option == "Google Gemini":
         # Use the correct supported model name for v1beta API
         model = os.getenv("GOOGLE_LLM_MODEL", "gemini-pro")
-        print(f"LLM model is: {model}")
         return ChatGoogleGenerativeAI(
             model=model,
             temperature=0.7,

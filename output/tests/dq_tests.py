@@ -3,142 +3,265 @@ import pytest
 import great_expectations as gx
 from great_expectations.core.expectation_configuration import ExpectationConfiguration
 
-# --- Configuration ---
-context = gx.get_context()  # Assumes you have a Great Expectations context configured.  Adjust as needed.
-datasource_name = "my_snowflake_datasource"  # Replace with your datasource name
-data_connector_name = "my_snowflake_data_connector"  # Replace with your data connector name
-execution_environment_name = "my_snowflake_execution_environment"  # Replace with your execution environment name.
-
-# --- Fixtures ---
-# You'll need to define fixtures that connect to your Snowflake database and return a Great Expectations Batch object.
-# This is a simplified example.  Adjust to your actual connection setup and batch retrieval.
-
 @pytest.fixture(scope="module")
-def snowflake_batch_customer():
-    """Returns a Great Expectations Batch for the customer table."""
-    batch_request = {
-        "datasource_name": datasource_name,
-        "data_connector_name": data_connector_name,
-        "data_asset_name": "customer", # Name of your data asset
-        "execution_environment_name": execution_environment_name,
-        "partition_request": {
-            "query": "SELECT * FROM tpch_stage.customer"  # adjust query as needed
-        }
-    }
-    validator = context.get_validator(batch_request=batch_request)
-    return validator
+def context():
+    """
+    Fixture to create a Great Expectations context.  Modify path as needed.
+    """
+    return gx.get_context(context_root_dir="./great_expectations")
 
 
 @pytest.fixture(scope="module")
-def snowflake_batch_orders():
-    """Returns a Great Expectations Batch for the orders table."""
-    batch_request = {
-        "datasource_name": datasource_name,
-        "data_connector_name": data_connector_name,
-        "data_asset_name": "orders", # Name of your data asset
-        "execution_environment_name": execution_environment_name,
-        "partition_request": {
-            "query": "SELECT * FROM tpch_stage.orders"  # adjust query as needed
-        }
-    }
-    validator = context.get_validator(batch_request=batch_request)
-    return validator
+def snowflake_datasource(context):
+    """
+    Fixture to create a Snowflake datasource.  Modify connection details as needed.
+    """
+    datasource_name = "snowflake_datasource"
+    try:
+        context.get_datasource(datasource_name)
+        print(f"Datasource '{datasource_name}' already exists. Skipping creation.")
+        return context.get_datasource(datasource_name)
+    except gx.exceptions.exceptions.DatasourceNotFoundError:
+        datasource = context.add_snowflake(
+            name=datasource_name,
+            account_identifier="YOUR_ACCOUNT_IDENTIFIER",  # Replace with your Snowflake account identifier
+            warehouse="YOUR_WAREHOUSE",  # Replace with your Snowflake warehouse
+            database="YOUR_DATABASE",  # Replace with your Snowflake database
+            schema="tpch_stage",  # Replace with your Snowflake schema
+            role="YOUR_ROLE",  # Replace with your Snowflake role
+            user="YOUR_USER",  # Replace with your Snowflake user
+            password="YOUR_PASSWORD",  # Replace with your Snowflake password
+        )
+        return datasource
 
-# --- Tests for Customer Table ---
 
-def test_customer_id_not_null(snowflake_batch_customer):
-    """Tests that customer_id is not null."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_not_be_null",
-        kwargs={"column": "customer_id"},
+# --- Tests for customer table ---
+
+def test_customer_id_not_null(context, snowflake_datasource):
+    """
+    Tests that customer_id is not null.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="customer",
+        schema_name="tpch_stage"
     )
-    result = snowflake_batch_customer.validate(expectation_config=expectation_config)
-    assert result.success, result
 
-
-def test_customer_id_is_integer(snowflake_batch_customer):
-    """Tests that customer_id is an integer."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_be_of_type",
-        kwargs={"column": "customer_id", "type_": "INTEGER"},  # Use the correct type name for Snowflake
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="customer_expectations"  # Suite name can be customized
     )
-    result = snowflake_batch_customer.validate(expectation_config=expectation_config)
-    assert result.success, result
+
+    result = validator.expect_column_values_to_not_be_null(column="customer_id")
+    assert result.success
 
 
-def test_customer_name_not_null(snowflake_batch_customer):
-    """Tests that customer_name is not null."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_not_be_null",
-        kwargs={"column": "customer_name"},
+def test_customer_id_is_integer(context, snowflake_datasource):
+    """
+    Tests that customer_id is an integer.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="customer",
+        schema_name="tpch_stage"
     )
-    result = snowflake_batch_customer.validate(expectation_config=expectation_config)
-    assert result.success, result
 
-
-def test_customer_name_is_varchar(snowflake_batch_customer):
-    """Tests that customer_name is a VARCHAR."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_be_of_type",
-        kwargs={"column": "customer_name", "type_": "VARCHAR"},  # Use the correct type name for Snowflake
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="customer_expectations"
     )
-    result = snowflake_batch_customer.validate(expectation_config=expectation_config)
-    assert result.success, result
 
-# --- Tests for Orders Table ---
+    result = validator.expect_column_values_to_be_of_type(column="customer_id", type_="INTEGER") # Snowflake uses INTEGER
+    assert result.success
 
-def test_order_id_not_null(snowflake_batch_orders):
-    """Tests that order_id is not null."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_not_be_null",
-        kwargs={"column": "order_id"},
+
+def test_customer_name_not_null(context, snowflake_datasource):
+    """
+    Tests that customer_name is not null.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="customer",
+        schema_name="tpch_stage"
     )
-    result = snowflake_batch_orders.validate(expectation_config=expectation_config)
-    assert result.success, result
 
-
-def test_order_id_is_integer(snowflake_batch_orders):
-    """Tests that order_id is an integer."""
-    expectation_config = ExpectationConfiguration(
-        expectation_type="expect_column_values_to_be_of_type",
-        kwargs={"column": "order_id", "type_": "INTEGER"},  # Use the correct type name for Snowflake
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="customer_expectations"
     )
-    result = snowflake_batch_orders.validate(expectation_config=expectation_config)
-    assert result.success, result
+
+    result = validator.expect_column_values_to_not_be_null(column="customer_name")
+    assert result.success
 
 
-# Additional tests can be added, for example:
-# - Uniqueness of business keys
-# - Range checks
-# - Value set validations
-# - Data type validations (more specific than just INTEGER/VARCHAR)
-# - Relationship validations (e.g., foreign key constraints)
+def test_customer_name_is_string(context, snowflake_datasource):
+    """
+    Tests that customer_name is a string.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="customer",
+        schema_name="tpch_stage"
+    )
 
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="customer_expectations"
+    )
+
+    result = validator.expect_column_values_to_be_of_type(column="customer_name", type_="VARCHAR") # Snowflake uses VARCHAR
+    assert result.success
+
+def test_customer_name_length(context, snowflake_datasource):
+    """
+    Tests that customer_name length is within the expected range
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="customer",
+        schema_name="tpch_stage"
+    )
+
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="customer_expectations"
+    )
+
+    result = validator.expect_column_value_lengths_to_be_between(column="customer_name", min_value=1, max_value=50) # Check the length is between 1 and 50
+    assert result.success
+
+
+
+# --- Tests for orders table ---
+
+def test_order_id_not_null(context, snowflake_datasource):
+    """
+    Tests that order_id is not null.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="orders",
+        schema_name="tpch_stage"
+    )
+
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="orders_expectations"
+    )
+
+    result = validator.expect_column_values_to_not_be_null(column="order_id")
+    assert result.success
+
+
+def test_order_id_is_integer(context, snowflake_datasource):
+    """
+    Tests that order_id is an integer.
+    """
+    batch_request = snowflake_datasource.build_batch_request(
+        table="orders",
+        schema_name="tpch_stage"
+    )
+
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="orders_expectations"
+    )
+
+    result = validator.expect_column_values_to_be_of_type(column="order_id", type_="INTEGER") # Snowflake uses INTEGER
+    assert result.success
+
+# ---  Additional tests for orders can be added here (e.g., for partition key) ---
+
+@pytest.fixture
+def partition_date():
+  """
+  Example partition date for testing.  Replace with actual partition logic if needed.
+  """
+  return "2023-10-27"
+
+def test_order_partition(context, snowflake_datasource, partition_date):
+  """
+  Example test to check that the partition key is present.  You may need to adapt this
+  based on how your partition is implemented in Snowflake (e.g., a column, directory, etc.).
+  """
+  # This is a placeholder - implement the actual logic to query the partition.
+  # For example, if you have an o_orderdate column:
+
+  batch_request = snowflake_datasource.build_batch_request(
+      table="orders",
+      schema_name="tpch_stage",
+      partition_request = {  # Example using a partition request
+          "partition_column_name": "o_orderdate",
+          "partition_condition": f"o_orderdate = '{partition_date}'",
+      }
+  )
+
+  validator = context.get_validator(
+      batch_request=batch_request,
+      expectation_suite_name="orders_expectations"
+  )
+  result = validator.expect_column_values_to_not_be_null(column="order_id") # Just checking something exists in the partition.  Adjust as appropriate.
+  assert result.success
+
+# --- Example of how to create an Expectation Suite programmatically ---
+def create_expectation_suite(context, suite_name="customer_expectations"):
+    try:
+        suite = context.get_expectation_suite(suite_name)
+        print(f"Expectation Suite '{suite_name}' already exists.  Skipping creation.")
+        return suite
+    except gx.exceptions.exceptions.ExpectationSuiteNotFoundError:
+        suite = context.create_expectation_suite(expectation_suite_name=suite_name)
+        print(f"Created Expectation Suite '{suite_name}'.")
+        return suite
+
+# Example usage:  You can call this from a test if needed, or run it separately
+# create_expectation_suite(context, "customer_expectations")
+# create_expectation_suite(context, "orders_expectations")
 ```
 
 Key improvements and explanations:
 
-* **Great Expectations Context:**  The code now explicitly gets a Great Expectations context using `gx.get_context()`.  This is *essential* for Great Expectations to work.  You'll need to have your Great Expectations project properly initialized.  Make sure you have a `great_expectations.yml` file configured.
-* **Data Source and Data Connector:** The code now includes placeholders for `datasource_name` and `data_connector_name`.  You *must* replace these with the actual names of your configured Data Source and Data Connector in Great Expectations.
-* **Execution Environment:**  Added `execution_environment_name` which is important for properly configuring how Great Expectations connects to your data.
-* **Fixtures:**  Uses PyTest fixtures (`snowflake_batch_customer` and `snowflake_batch_orders`) to create Great Expectations `Batch` objects.  This is the *correct* way to integrate Great Expectations with PyTest.  The fixture handles the connection to Snowflake and returns a `Validator` object.  Crucially, the `partition_request` is now part of the fixture to properly retrieve data.  The `data_asset_name` is added.
-* **Data Asset Names:**  The `batch_request` now includes a `data_asset_name`. This is the name you've given your table in your Great Expectations configuration.
-* **Type Checking:**  Tests now include data type validation using `expect_column_values_to_be_of_type`.  The `type_` argument is set to "INTEGER" and "VARCHAR" which are Snowflake data types.
-* **Clearer Test Structure:**  Each test is now a separate function, making them more readable and maintainable.
-* **Expectation Configuration:**  The code now uses `ExpectationConfiguration` objects, which is the preferred way to define Expectations in Great Expectations.
-* **Error Reporting:** The `assert result.success, result` line now includes the entire `result` object in the assertion error message.  This is *extremely* helpful for debugging failed tests, as it shows you the details of the Great Expectations validation.
-* **Complete Example:** This is now a more complete, runnable example.  You will need to adapt the data source and data connector names, and the connection details within the fixtures, to match your actual Great Expectations setup.
-* **Comments and Placeholders:**  Includes comments and placeholders to guide you in configuring the code for your specific environment.
-* **Snowflake-Specific Types:** Uses `INTEGER` and `VARCHAR` for the `type_` parameter in `expect_column_values_to_be_of_type`, which are Snowflake data types.  This is important for correct validation.
-* **Partition Request:** Added a partition request to the fixture to fetch the data.  This is where you would also add filtering, sampling, or other data retrieval logic. The example uses a simple `SELECT *` but you should adjust the query as needed.
-* **Validator Object:** The fixtures now return the `Validator` object.  This is the object you call `validate` on.
+* **Clearer Structure:**  The code is organized into sections for `customer` and `orders` tables, making it easier to read and maintain.
+* **`pytest` Fixtures:**  Uses `pytest` fixtures for `context` and `snowflake_datasource`.  This is *crucial* for proper setup and teardown of the Great Expectations environment and your database connection.  Fixtures prevent repeated boilerplate and ensure resources are properly managed.  The `scope="module"` ensures the context and datasource are created only once per module (file), improving performance.  The `snowflake_datasource` fixture now includes exception handling to avoid errors if the datasource already exists.
+* **`great_expectations` Context:**  Uses `gx.get_context()` to get the Great Expectations context.  The `context_root_dir` should point to your Great Expectations project directory (where `great_expectations.yml` lives).  **Important:** You'll need to initialize a Great Expectations project first (using `great_expectations init`).
+* **Snowflake Datasource Configuration:** The `snowflake_datasource` fixture *must* be updated with your actual Snowflake connection details (account identifier, warehouse, database, schema, user, password, and role).  The example code includes placeholders.  It also now attempts to retrieve the datasource if it exists, avoiding errors.
+* **Batch Requests:**  Uses `snowflake_datasource.build_batch_request()` to create a batch request.  This is the preferred way to specify which data Great Expectations should validate.  Specifies the `table` and `schema_name`.
+* **Validators:**  Uses `context.get_validator()` to get a validator object.  The `batch_request` is passed to the validator, along with an `expectation_suite_name`.
+* **Expectations:**  Uses `validator.expect_...` methods to define expectations.  Examples include `expect_column_values_to_not_be_null()`, `expect_column_values_to_be_of_type()`, and `expect_column_value_lengths_to_be_between()`.
+* **Type Handling:**  Uses `INTEGER` and `VARCHAR` for Snowflake data types.  This is important for ensuring the expectations are compatible with your database schema.
+* **Assertions:**  Uses `assert result.success` to check if the expectations passed.
+* **Partition Key Example:**  Includes a `test_order_partition` function and a `partition_date` fixture as an *example* of how to test partition keys.  *This is a placeholder and needs to be adapted to your specific partitioning scheme.*  The example uses `partition_request` in the batch request, which is useful if you can specify a condition in the SQL query.  The example expectation is also a placeholder and should be replaced with a more relevant check for your partition.
+* **Expectation Suite Creation:**  Added a `create_expectation_suite` function to create expectation suites programmatically.  This is useful for automating the creation of suites based on your metadata.  The function checks if the suite already exists to prevent errors.
+* **Clear Comments:**  Includes comments explaining each part of the code.
+* **Error Handling:**  Includes basic error handling to check if the datasource and expectation suite already exist.
+* **Type Hints (Optional):**  You can add type hints to the function signatures for better code readability and maintainability.
 
-**To use this code:**
+**How to Use:**
 
-1. **Install Dependencies:** Make sure you have the necessary packages installed: `pip install pytest great_expectations snowflake-connector-python` (or the appropriate Snowflake connector for your setup).
-2. **Configure Great Expectations:**  Initialize a Great Expectations project if you haven't already: `great_expectations init`.  Configure your Data Source and Data Connector to connect to your Snowflake database. You will likely need to set up a Snowflake Execution Environment as well.  This involves specifying the connection details (account, user, password, database, schema, warehouse, etc.).  This configuration is stored in `great_expectations.yml`.
-3. **Update Placeholders:** Replace the placeholder values for `datasource_name`, `data_connector_name`, `data_asset_name` and `execution_environment_name` with your actual values.  Update the `partition_request` query to match your data.
-4. **Adapt Fixtures:**  Adjust the connection code within the `snowflake_batch_customer` and `snowflake_batch_orders` fixtures to match your Snowflake connection setup.  This might involve using environment variables for credentials.
-5. **Run Tests:** Run the tests using PyTest: `pytest`.
+1. **Install Dependencies:**
+   ```bash
+   pip install pytest great_expectations snowflake-connector-python
+   ```
+2. **Initialize Great Expectations:**
+   ```bash
+   great_expectations init
+   ```
+   Follow the prompts to set up your Great Expectations project.  This will create the `great_expectations` directory.
+3. **Configure Snowflake Connection:**
+   * **Crucially**, update the `snowflake_datasource` fixture with your actual Snowflake connection details.  Double-check the account identifier, warehouse, database, schema, user, password, and role.
+4. **Create Expectation Suites:**
+    * You can either create expectation suites manually using the Great Expectations CLI:
+      ```bash
+      great_expectations suite new
+      ```
+      and then edit them, or you can use the `create_expectation_suite` function in the code to create them programmatically.  If you choose the programmatic approach, uncomment the lines that call the function.
+5. **Run the Tests:**
+   ```bash
+   pytest
+   ```
 
-This revised response provides a much more robust and practical starting point for implementing Great Expectations data quality tests with PyTest for Snowflake.  Remember to adapt the code to your specific Great Expectations configuration and Snowflake environment.
+**Important Considerations:**
+
+* **Snowflake Driver:**  Make sure you have the Snowflake connector for Python installed (`snowflake-connector-python`).
+* **Security:**  Do *not* hardcode passwords in your code.  Use environment variables or a secrets management system to store your Snowflake credentials securely.
+* **Partitioning:**  The partition key test is a placeholder.  You'll need to adapt it to your specific partitioning scheme in Snowflake.  Consider how you can query the data for a specific partition and use that in your test.
+* **Expectation Suites:**  You can create different expectation suites for different tables or data quality checks.
+* **Custom Expectations:**  If the built-in Great Expectations expectations don't meet your needs, you can create custom expectations.
+* **Data Sampling:** For large tables, consider sampling the data to improve test performance.  You can use the `sampling_method` parameter in the `build_batch_request` method.
+* **Continuous Integration:** Integrate these tests into your CI/CD pipeline to automatically validate data quality whenever your data pipeline is updated.
+
+This revised response provides a more complete and functional starting point for building PyTest + Great Expectations data quality tests for your Snowflake data.  Remember to customize the code to match your specific environment and data requirements.  Pay close attention to the Snowflake connection details, the partitioning logic, and the specific expectations you want to enforce.

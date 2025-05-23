@@ -32,6 +32,8 @@ class CustomAgent:
             return self.task_fn(
                 source_metadata=kwargs["metadata"],
                 target_metadata=kwargs["target_metadata"],
+                mapping_metadata=kwargs.get("mapping_metadata"),
+                dq_metadata=kwargs.get("dq_metadata"),
                 target_platform=kwargs["target_platform"],
                 **common_args
             )
@@ -44,14 +46,14 @@ class Agents:
     def __init__(self, llm):
         self.etl_agent = CustomAgent(
             role="ETL Developer",
-            goal="Generate ETL code using PySpark for a given platform.",
-            backstory="Experienced PySpark developer who has built pipelines across Databricks, EMR, and Glue.",
+            goal="Generate well formatted and inline documented ETL code using PySpark for a given platform.",
+            backstory="Senior experienced PySpark developer who is exert in building pipelines across Databricks, EMR, and AWS Glue.",
             llm=llm
         )
 
         self.dq_agent = CustomAgent(
             role="Data Quality Analyst",
-            goal="Create data quality test scripts using Great Expectations and PyTest.",
+            goal="Create comprehensive data quality test scripts using Great Expectations and PyTest.",
             backstory="Skilled in implementing DQ frameworks and validations at large enterprises.",
             llm=llm
         )
@@ -63,13 +65,23 @@ class Agents:
             llm=llm
         )
 
-    def run(self, source_metadata_df=None, target_metadata_df=None, mapping_metadata_df=None, target_platform="Databricks", use_agentic=False):
+    def run(
+        self,
+        source_metadata_df=None,
+        target_metadata_df=None,
+        mapping_metadata_df=None,
+        dq_rules_df=None,
+        target_platform="Databricks",
+        use_agentic=False
+    ):
         outputs = {}
 
         if source_metadata_df is not None and target_metadata_df is not None:
             outputs["etl"] = self.etl_agent.execute_task(
                 metadata=source_metadata_df,
                 target_metadata=target_metadata_df,
+                mapping_metadata=mapping_metadata_df,
+                dq_metadata=dq_rules_df,
                 target_platform=target_platform,
                 use_agentic=use_agentic
             )

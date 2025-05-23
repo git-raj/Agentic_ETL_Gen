@@ -1,79 +1,85 @@
 import re
 
-def generate_etl_code(source_metadata, target_metadata, target_platform, llm, use_agentic=False):
+#TODO need LLM generate cde based on source, target and mapping.
+def generate_etl_code(source_metadata, target_metadata, target_platform, llm, use_agentic=False, mapping_metadata=None, dq_metadata=None):
     """
-    Generates PySpark code for ETL based on the provided metadata and target platform.
+    Generates complete PySpark code for ETL based on metadata.
+    Includes transformation rules, data quality filters, and error segregation.
     """
-    print("Generating ETL code...")
+    if source_metadata.empty or target_metadata.empty:
+        return "Error: Missing source or target metadata."
 
-    if source_metadata.empty:
-        return "Error: Source metadata is empty."
-    if target_metadata.empty:
-        return "Error: Target metadata is empty."
+    source_table = source_metadata['Source Table Name'].dropna().unique()[0]
+    target_table = target_metadata['Target Table Name'].dropna().unique()[0]
+    target_table_rejected = f"{target_table}_rejected"
 
-    if 'Source Table Name' not in source_metadata.columns:
-        return "Error: 'Source Table Name' column not found in source metadata."
-    if 'Target Table Name' not in target_metadata.columns:
-        return "Error: 'Target Table Name' column not found in target metadata."
-
-    source_table_names = source_metadata['Source Table Name'].dropna().unique()
-    if len(source_table_names) == 0:
-        return "Error: No non-null 'Source Table Name' found in source metadata."
-    target_table_names = target_metadata['Target Table Name'].dropna().unique()
-    if len(target_table_names) == 0:
-        return "Error: No non-null 'Target Table Name' found in target metadata."
-
-    source_table = source_table_names[0]
-    target_table = target_table_names[0]
-
+    # Build transformation logic from Mapping Metadata
     transformation_lines = []
-    for _, row in target_metadata.iterrows():
-        target_col = row.get('Target Column Name')
-        transformation = row.get('Transformation Logic') or 'source_df["<source_col>"]'
+    filter_conditions = []
+    join_conditions = []
+    if mapping_metadata is not None:
+        for _, row in mapping_metadata.iterrows():
+            expr = str(row.get('Business Rule / Expression', '')).strip()
+            if '=' in expr:
+                target_col, logic = [x.strip() for x in expr.split('=', 1)]
+                transformation_lines.append(f'    df = df.withColumn("{target_col}", {logic})')
+            if row.get("Filter Conditions"):
+                filter_conditions.append(row["Filter Conditions"])
+            if row.get("Join Conditions"):
+                join_conditions.append(row["Join Conditions"])
 
-        if not target_col:
-            continue
+    dq_checks = []
+    quarantine_conditions = []
+    if dq_metadata is not None:
+        for _, rule in dq_metadata.iterrows():
+            validation = str(rule.get("Validations", "")).strip().lower()
+            action = str(rule.get("Reject Handling", "")).strip().lower()
+            col = rule.get("Column Name", "").strip()
 
-        # Extract source column name from transformation logic
-        match = re.search(r"Direct mapping from (.*)", transformation)
-        if match:
-            source_col = match.group(1)
-            transformation = f'source_df["{source_col}"]'
-        else:
-            transformation = 'source_df["<source_col>"]'  # Default transformation
+            if not col:
+                continue
 
-        line = f'    target_df = target_df.withColumn("{target_col}", {transformation})'
-        transformation_lines.append(line)
-    print(f"Transformation lines: {transformation_lines}")
+            if validation == "not null":
+                condition = f"df['{col}'].isNotNull()"
+            elif validation.startswith("range"):
+                try:
+                    bounds = validation.split("(")[1].split(")")[0].split(',')
+                    min_val, max_val = bounds[0].strip(), bounds[1].strip()
+                    condition = f"(df['{col}'] >= {min_val}) & (df['{col}'] <= {max_val})"
+                except Exception:
+                    continue
+            else:
+                continue
 
-    # Platform-specific setup
+            dq_checks.append(condition)
+            if action == "quarantine":
+                quarantine_conditions.append(condition)
+
+    dq_expression = " & ".join(quarantine_conditions) if quarantine_conditions else "True"
+
+    # Platform setup
     if target_platform == "Databricks":
         platform_setup = """
     # Databricks-specific setup
     spark.conf.set("spark.databricks.io.cache.enabled", "true")
 """
-        write_method = f'target_df.write.format("delta").mode("overwrite").saveAsTable("{target_table}")'
-
-    elif target_platform == "EMR":
-        platform_setup = """
-    # EMR-specific setup
-    spark.conf.set("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
-"""
-        write_method = f'target_df.write.mode("overwrite").saveAsTable("{target_table}")'
+        write_valid = f'df_valid.write.format("delta").mode("overwrite").saveAsTable("{target_table}")'
+        write_invalid = f'df_invalid.write.format("delta").mode("overwrite").saveAsTable("{target_table_rejected}")'
 
     elif target_platform == "AWS Glue":
         platform_setup = """
     # AWS Glue-specific setup
-    import sys
     from awsglue.context import GlueContext
     from awsglue.utils import getResolvedOptions
-
     glueContext = GlueContext(spark.sparkContext)
 """
-        write_method = f'glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(target_df, glueContext, "target"), connection_type="s3", connection_options={{"path": "s3://your-bucket/{target_table}"}}, format="parquet")'
+        write_valid = f'glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(df_valid, glueContext, "target"), connection_type="s3", connection_options={{"path": "s3://your-bucket/{target_table}"}}, format="parquet")'
+        write_invalid = f'glueContext.write_dynamic_frame.from_options(frame=DynamicFrame.fromDF(df_invalid, glueContext, "rejected"), connection_type="s3", connection_options={{"path": "s3://your-bucket/{target_table_rejected}"}}, format="parquet")'
+
     else:
         platform_setup = "    # Generic Spark setup"
-        write_method = f'target_df.write.mode("overwrite").saveAsTable("{target_table}")'
+        write_valid = f'df_valid.write.mode("overwrite").saveAsTable("{target_table}")'
+        write_invalid = f'df_invalid.write.mode("overwrite").saveAsTable("{target_table_rejected}")'
 
     pyspark_code = f"""
 from pyspark.sql import SparkSession
@@ -83,15 +89,18 @@ def main():
     spark = SparkSession.builder.appName("ETL Job").getOrCreate()
 {platform_setup}
 
-    # Read source data
-    source_df = spark.table("{source_table}")
-    target_df = source_df
+    df = spark.table("{source_table}")
 
-    # Apply transformations
+    # Transformations
 {chr(10).join(transformation_lines)}
 
-    # Write target data
-    {write_method}
+    # Data Quality Checks & Quarantine
+    df_valid = df.filter({dq_expression})
+    df_invalid = df.subtract(df_valid)
+
+    # Write outputs
+    {write_valid}
+    {write_invalid}
 
     spark.stop()
 
