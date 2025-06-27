@@ -1,0 +1,16 @@
+
+vault_project:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake  # Change to your warehouse type
+      account: your_account
+      user: your_user
+      password: your_password
+      role: your_role
+      database: your_database
+      warehouse: your_warehouse
+      schema: your_schema
+      threads: 4
+      keepalives_idle: 0
+      search_path: your_search_path

@@ -1,0 +1,49 @@
+
+name: 'vault_project'
+version: '1.0.0'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'vault_project'
+
+# These configurations specify where dbt should look for different types of files.
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Model configurations
+models:
+  vault_project:
+    # Staging models
+    staging:
+      +materialized: view
+      +schema: staging
+    
+    # Vault models
+    vault:
+      +materialized: incremental
+      +schema: vault
+      hubs:
+        +tags: ["hub"]
+      links:
+        +tags: ["link"]
+      satellites:
+        +tags: ["satellite"]
+
+# Test configurations
+tests:
+  +store_failures: true
+  +schema: test_failures
+
+# Snapshot configurations
+snapshots:
+  vault_project:
+    +target_schema: snapshots

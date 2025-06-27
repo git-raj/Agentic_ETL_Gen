@@ -22,7 +22,7 @@ def main():
         llm_instance = get_llm_instance(llm_option)
         st.session_state.llm_instance = llm_instance
 
-        target_platform = st.selectbox("🎯 Select Target Platform", ["Databricks", "EMR", "AWS Glue"], index=0)
+        target_platform = st.selectbox("🎯 Select Target Platform", ["AWS Glue", "Snowpark", "Databricks", "EMR", "dbT Raw Vault"], index=0)
         st.session_state.target_platform = target_platform
 
         use_agentic = st.checkbox("🤖 Use Agentic LLM-based Generation", value=False)
@@ -68,10 +68,25 @@ def main():
         metadata_dir = os.path.join(output_dir, "metadata")
         tests_dir = os.path.join(output_dir, "tests")
         airflow_dir = os.path.join(output_dir, "airflow")
+        
+        # Create dbT-specific directories
+        dbt_dir = os.path.join(output_dir, "dbt")
+        dbt_models_dir = os.path.join(dbt_dir, "models")
+        dbt_staging_dir = os.path.join(dbt_models_dir, "staging")
+        dbt_vault_dir = os.path.join(dbt_models_dir, "vault")
+        dbt_tests_dir = os.path.join(dbt_dir, "tests")
+        dbt_macros_dir = os.path.join(dbt_dir, "macros")
+        
         os.makedirs(etl_dir, exist_ok=True)
         os.makedirs(metadata_dir, exist_ok=True)
         os.makedirs(tests_dir, exist_ok=True)
         os.makedirs(airflow_dir, exist_ok=True)
+        os.makedirs(dbt_dir, exist_ok=True)
+        os.makedirs(dbt_models_dir, exist_ok=True)
+        os.makedirs(dbt_staging_dir, exist_ok=True)
+        os.makedirs(dbt_vault_dir, exist_ok=True)
+        os.makedirs(dbt_tests_dir, exist_ok=True)
+        os.makedirs(dbt_macros_dir, exist_ok=True)
 
         if generate_now:
             agents = Agents(llm=st.session_state.llm_instance)
@@ -93,16 +108,74 @@ def main():
                 generate_airflow=generate_airflow
             )
 
+            # Handle ETL generation based on platform
             if generate_etl and results.get("etl"):
-                st.session_state.etl_path = etl_script_path
-                with open(st.session_state.etl_path, "w") as f:
-                    f.write(results["etl"])
+                if st.session_state.target_platform == "dbT Raw Vault":
+                    # Handle dbT Vault outputs
+                    etl_result = results["etl"]
+                    
+                    # Save vault models
+                    if "vault_models" in etl_result:
+                        vault_models = etl_result["vault_models"]
+                        st.session_state.dbt_files = {}
+                        
+                        for model_name, model_sql in vault_models.items():
+                            if model_name.startswith("stg_"):
+                                file_path = os.path.join(dbt_staging_dir, f"{model_name}.sql")
+                            elif model_name.startswith(("hub_", "link_", "sat_")):
+                                file_path = os.path.join(dbt_vault_dir, f"{model_name}.sql")
+                            else:
+                                file_path = os.path.join(dbt_models_dir, f"{model_name}.sql")
+                            
+                            with open(file_path, "w") as f:
+                                f.write(model_sql)
+                            st.session_state.dbt_files[model_name] = file_path
+                    
+                    # Save project files
+                    if "project_files" in etl_result:
+                        project_files = etl_result["project_files"]
+                        for file_name, file_content in project_files.items():
+                            file_path = os.path.join(dbt_dir, file_name)
+                            with open(file_path, "w") as f:
+                                f.write(file_content)
+                            if file_name == "dbt_project.yml":
+                                st.session_state.dbt_project_path = file_path
+                else:
+                    # Handle regular ETL outputs
+                    st.session_state.etl_path = etl_script_path
+                    with open(st.session_state.etl_path, "w") as f:
+                        f.write(results["etl"])
 
+            # Handle DQ generation based on platform
             if generate_dq and results.get("dq"):
-                dq_path = os.path.join(tests_dir, f"{metadata_base}-dq_tests.py")
-                st.session_state.dq_generated = dq_path
-                with open(dq_path, "w") as f:
-                    f.write(results["dq"])
+                if st.session_state.target_platform == "dbT Raw Vault":
+                    # Handle dbT test outputs
+                    dq_result = results["dq"]
+                    st.session_state.dbt_test_files = {}
+                    
+                    if isinstance(dq_result, dict):
+                        for test_file_name, test_content in dq_result.items():
+                            if test_file_name.endswith(".sql"):
+                                file_path = os.path.join(dbt_macros_dir, test_file_name)
+                            else:
+                                file_path = os.path.join(dbt_tests_dir, test_file_name)
+                            
+                            with open(file_path, "w") as f:
+                                f.write(test_content)
+                            st.session_state.dbt_test_files[test_file_name] = file_path
+                    
+                    # Save sources.yml if generated
+                    if results.get("sources_yml"):
+                        sources_path = os.path.join(dbt_models_dir, "sources.yml")
+                        with open(sources_path, "w") as f:
+                            f.write(results["sources_yml"])
+                        st.session_state.dbt_sources_path = sources_path
+                else:
+                    # Handle regular DQ outputs
+                    dq_path = os.path.join(tests_dir, f"{metadata_base}-dq_tests.py")
+                    st.session_state.dq_generated = dq_path
+                    with open(dq_path, "w") as f:
+                        f.write(results["dq"])
 
             if generate_lineage and results.get("lineage"):
                 lineage_path = os.path.join(metadata_dir, f"{metadata_base}-lineage.json")
@@ -131,19 +204,62 @@ def main():
         st.session_state.scroll_to_output = False
 
         with right_col:
-            if etl_path := st.session_state.get("etl_path"):
-                with st.expander("🧾 Generated ETL Code", expanded=True):
-                    with open(etl_path) as f:
-                        content = f.read()
-                        st.code(content, language="python")
-                        st.download_button("⬇️ Download ETL Code", content, file_name=os.path.basename(etl_path))
+            # Display dbT-specific outputs
+            if st.session_state.target_platform == "dbT Raw Vault":
+                # Display dbT project file
+                if dbt_project_path := st.session_state.get("dbt_project_path"):
+                    with st.expander("📋 dbT Project Configuration", expanded=True):
+                        with open(dbt_project_path) as f:
+                            content = f.read()
+                            st.code(content, language="yaml")
+                            st.download_button("⬇️ Download dbt_project.yml", content, file_name="dbt_project.yml")
+                
+                # Display dbT models
+                if dbt_files := st.session_state.get("dbt_files"):
+                    with st.expander("🏗️ Generated dbT Vault Models", expanded=True):
+                        for model_name, file_path in dbt_files.items():
+                            st.subheader(f"📄 {model_name}.sql")
+                            with open(file_path) as f:
+                                content = f.read()
+                                st.code(content, language="sql")
+                                st.download_button(f"⬇️ Download {model_name}.sql", content, file_name=f"{model_name}.sql", key=f"download_{model_name}")
+                
+                # Display dbT test files
+                if dbt_test_files := st.session_state.get("dbt_test_files"):
+                    with st.expander("🧪 dbT Data Quality Tests", expanded=True):
+                        for test_name, file_path in dbt_test_files.items():
+                            st.subheader(f"📄 {test_name}")
+                            with open(file_path) as f:
+                                content = f.read()
+                                if test_name.endswith(".sql"):
+                                    st.code(content, language="sql")
+                                else:
+                                    st.code(content, language="yaml")
+                                st.download_button(f"⬇️ Download {test_name}", content, file_name=test_name, key=f"download_test_{test_name}")
+                
+                # Display sources.yml
+                if dbt_sources_path := st.session_state.get("dbt_sources_path"):
+                    with st.expander("📊 dbT Sources Configuration", expanded=True):
+                        with open(dbt_sources_path) as f:
+                            content = f.read()
+                            st.code(content, language="yaml")
+                            st.download_button("⬇️ Download sources.yml", content, file_name="sources.yml")
+            
+            else:
+                # Display regular ETL outputs
+                if etl_path := st.session_state.get("etl_path"):
+                    with st.expander("🧾 Generated ETL Code", expanded=True):
+                        with open(etl_path) as f:
+                            content = f.read()
+                            st.code(content, language="python")
+                            st.download_button("⬇️ Download ETL Code", content, file_name=os.path.basename(etl_path))
 
-            if dq_path := st.session_state.get("dq_generated"):
-                with st.expander("🧪 Data Quality Tests", expanded=True):
-                    with open(dq_path) as f:
-                        content = f.read()
-                        st.code(content, language="python")
-                        st.download_button("⬇️ Download DQ Tests", content, file_name=os.path.basename(dq_path))
+                if dq_path := st.session_state.get("dq_generated"):
+                    with st.expander("🧪 Data Quality Tests", expanded=True):
+                        with open(dq_path) as f:
+                            content = f.read()
+                            st.code(content, language="python")
+                            st.download_button("⬇️ Download DQ Tests", content, file_name=os.path.basename(dq_path))
 
             if lineage_path := st.session_state.get("lineage_generated"):
                 with st.expander("🧬 Lineage JSON", expanded=True):

@@ -1,161 +1,127 @@
 ```python
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, count, when
-from awsglue.context import GlueContext
-from awsglue.utils import getResolvedOptions
-import sys
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import col, lit
+from snowflake.snowpark.types import StructType, StructField, IntegerType, StringType, DateType
+import snowflake.connector
 
 def transform_data(customer_df, order_df):
     """
-    Transforms customer and order dataframes based on provided metadata.
+    Transforms data from customer and order DataFrames.
 
     Args:
-        customer_df (pyspark.sql.DataFrame): The customer dataframe.
-        order_df (pyspark.sql.DataFrame): The order dataframe.
+        customer_df (snowflake.snowpark.DataFrame): DataFrame representing the customer table.
+        order_df (snowflake.snowpark.DataFrame): DataFrame representing the order table.
 
     Returns:
-        dict: A dictionary containing the transformed dataframes, keyed by logical table name.
+        dict: A dictionary containing the transformed DataFrames, keyed by logical table name.
     """
 
-    # Create a dictionary to store the transformed dataframes
     transformed_data = {}
 
-    # ------------------- Customer Transformation -------------------
-    # Rename columns based on target metadata for customer table
+    # Customer Transformation
     customer_transformed_df = customer_df.select(
         col("c_custkey").alias("customer_id"),
         col("c_name").alias("customer_name")
     )
-
-    # Store the transformed customer dataframe
     transformed_data["customer"] = customer_transformed_df
 
-    # ------------------- Orders Transformation -------------------
-    # Apply filter conditions based on the mapping instructions
-    order_filtered_df = order_df.filter(col("o_orderdate") > lit("2020-01-01"))
-
-    # Perform join with customer table based on join conditions
-    order_joined_df = order_filtered_df.join(
-        customer_df, order_filtered_df["o_custkey"] == customer_df["c_custkey"], "inner"
-    )
-
-    # Select and rename columns based on target metadata for orders table
-    order_transformed_df = order_joined_df.select(
+    # Orders Transformation
+    filtered_order_df = order_df.filter(col("o_orderdate") > '2020-01-01')
+    joined_df = filtered_order_df.join(customer_df, col("o_custkey") == col("c_custkey"), "inner")
+    orders_transformed_df = joined_df.select(
         col("o_orderkey").alias("order_id")
     )
-
-    # Store the transformed order dataframe
-    transformed_data["orders"] = order_transformed_df
+    transformed_data["orders"] = orders_transformed_df
 
     return transformed_data
 
 
-def data_quality_checks(spark, df, table_name):
+def data_quality_checks(session, df, table_name):
     """
-    Performs data quality checks on a Spark DataFrame.
+    Performs data quality checks on a Snowpark DataFrame.
 
     Args:
-        spark (SparkSession): The SparkSession object.
-        df (DataFrame): The input DataFrame.
-        table_name (str): The name of the table being checked (for logging/metadata).
+        session (snowflake.snowpark.Session): The Snowpark session object.
+        df (snowflake.snowpark.DataFrame): The input Snowpark DataFrame.
+        table_name (str): The name of the table being checked.
 
     Returns:
-        tuple: A tuple containing:
-            - cleaned_df (DataFrame): The DataFrame after applying data quality rules.
-            - quarantine_df (DataFrame): The DataFrame containing records that failed the checks.
-            - record_count_valid (bool): A boolean indicating if the record count meets the expected threshold.
+        tuple: A tuple containing the cleaned DataFrame, quarantine DataFrame, and a boolean indicating record count validity.
     """
 
-    quarantine_df = spark.createDataFrame([], df.schema) # Initialize empty quarantine DataFrame with the same schema as df
     cleaned_df = df
-    record_count_valid = False
+    quarantine_df = session.create_dataframe([], schema=df.schema)
+    record_count_valid = True
 
-    # --------------------------------------------------
-    # Check 1: Not Null Validation
-    # --------------------------------------------------
-    # Identify columns with null values
-    null_counts = df.select([count(lit(1)).alias("total_count")] + [count(when(col(c).isNull(), c)).alias(c) for c in df.columns]).collect()[0].asDict()
-    null_cols = [col_name for col_name, null_count in null_counts.items() if col_name != "total_count" and null_count > 0]
+    # Not Null Check and Quarantine
+    null_check_columns = df.columns
+    null_condition = " OR ".join([f"col('{c}').isNull()" for c in null_check_columns])
 
-    if null_cols:
-        # Quarantine records with null values in specified columns
-        null_condition = ' OR '.join([f'({col_name} IS NULL)' for col_name in null_cols])
-        quarantine_df = quarantine_df.unionByName(df.where(null_condition), allowMissingColumns=True) # Append to quarantine_df
-        cleaned_df = df.where(f'NOT ({null_condition})') # Remove from cleaned_df
-        print(f"Quarantined {quarantine_df.count()} records due to null values in columns: {null_cols}")
-    else:
-        print("No null values found in specified columns.")
-    
-    # --------------------------------------------------
-    # Check 2: Record Count Validation
-    # --------------------------------------------------
-    expected_min_record_count = 0  # Expected minimum record count
+    invalid_records = df.filter(null_condition)
+    valid_records = df.filter(~eval(null_condition))
 
+    quarantine_df = quarantine_df.union(invalid_records)
+    cleaned_df = valid_records
+
+    # Record Count Check
     record_count = cleaned_df.count()
-    record_count_valid = record_count > expected_min_record_count
+    expected_record_count = 0
 
-    if record_count_valid:
-        print(f"Record count validation passed.  Count: {record_count}, Expected minimum: {expected_min_record_count}")
+    if record_count <= expected_record_count:
+        print(f"ERROR: Table {table_name} has {record_count} records, expected > {expected_record_count}")
+        record_count_valid = False
     else:
-        print(f"Record count validation failed. Count: {record_count}, Expected minimum: {expected_min_record_count}")
+        print(f"INFO: Table {table_name} has {record_count} records, which meets the expected threshold > {expected_record_count}")
 
     return cleaned_df, quarantine_df, record_count_valid
 
 
 def main():
-    args = getResolvedOptions(sys.argv, ['JOB_NAME', 'S3_SOURCE_PATH_CUSTOMER', 'S3_SOURCE_PATH_ORDERS', 'TARGET_DB', 'QUARANTINE_TABLE'])
-
-    glueContext = GlueContext(SparkSession.builder.getOrCreate().sparkContext)
-    spark = glueContext.spark_session
-
-    job = glueContext.start_job(args['JOB_NAME'])
-
-    customer_df = glueContext.create_dynamic_frame.from_options(
-        format_options={"quoteChar": '"', "withHeader": True, "separator": ","},
-        connection_type="s3",
-        format="csv",
-        connection_options={"paths": [args['S3_SOURCE_PATH_CUSTOMER']]},
-        transformation_ctx="customer_df"
-    ).toDF()
+    # Use Snowpark Session
+    session = Session.builder.configs(snowflake.connector.connection_config.SnowflakeURL()).create()
+    print(session.sql('select current_warehouse(), current_database(), current_schema()').collect())
 
 
-    order_df = glueContext.create_dynamic_frame.from_options(
-        format_options={"quoteChar": '"', "withHeader": True, "separator": ","},
-        connection_type="s3",
-        format="csv",
-        connection_options={"paths": [args['S3_SOURCE_PATH_ORDERS']]},
-        transformation_ctx="order_df"
-    ).toDF()
+    # Replace with your actual table names or file paths in Snowflake
+    customer_table = "CUSTOMER_TABLE"  # Example: 'MY_DATABASE.MY_SCHEMA.CUSTOMER'
+    orders_table = "ORDERS_TABLE" # Example: 'MY_DATABASE.MY_SCHEMA.ORDERS'
+    target_database = "TARGET_DATABASE" # Example: 'TARGET_DB'
+    target_schema = "TARGET_SCHEMA" #Example: 'TARGET_SCH'
+    quarantine_table = f"{target_database}.{target_schema}.QUARANTINE_RECORDS"
 
+    # Read data from Snowflake tables
+    try:
+        customer_df = session.table(customer_table)
+        order_df = session.table(orders_table)
+    except Exception as e:
+        print(f"Error reading tables: {e}")
+        session.close()
+        return
 
     transformed_data = transform_data(customer_df, order_df)
 
     for table_name, df in transformed_data.items():
-        cleaned_df, quarantine_df, record_count_valid = data_quality_checks(spark, df, table_name)
+        cleaned_df, quarantine_df, record_count_valid = data_quality_checks(session, df, table_name)
+
+        target_table_name = f"{target_database}.{target_schema}.TARGET_{table_name.upper()}"
+
 
         if cleaned_df is not None and record_count_valid:
-            glueContext.write_dynamic_frame.from_options(
-                frame = glueContext.create_dynamic_frame.fromDF(cleaned_df, glueContext, "cleaned_df"),
-                connection_type = "s3",
-                connection_options = {"path": f"s3://your-bucket/{args['TARGET_DB']}/target_{table_name}/", "partitionKeys": []}, # Replace with your bucket and path
-                format = "parquet",
-                transformation_ctx = f"write_{table_name}"
-            )
-            # Alternative for writing to Glue Catalog Table
-            # cleaned_df.write.mode("overwrite").saveAsTable(f"`{args['TARGET_DB']}`.target_{table_name}")
+            try:
+                cleaned_df.write.mode("overwrite").save_as_table(target_table_name)
+                print(f"Successfully wrote cleaned data to {target_table_name}")
+            except Exception as e:
+                print(f"Error writing cleaned data to {target_table_name}: {e}")
 
         if quarantine_df is not None and quarantine_df.count() > 0:
-            glueContext.write_dynamic_frame.from_options(
-                frame = glueContext.create_dynamic_frame.fromDF(quarantine_df, glueContext, "quarantine_df"),
-                connection_type = "s3",
-                connection_options = {"path": f"s3://your-bucket/quarantine/{args['QUARANTINE_TABLE']}/", "partitionKeys": []}, # Replace with your bucket and path
-                format = "parquet",
-                transformation_ctx = "write_quarantine"
-            )
-            # Alternative for writing to Glue Catalog Table
-            # quarantine_df.write.mode("append").saveAsTable(f"`{args['TARGET_DB']}`.{args['QUARANTINE_TABLE']}")
+             try:
+                quarantine_df.write.mode("append").save_as_table(quarantine_table)
+                print(f"Successfully wrote quarantine data to {quarantine_table}")
+             except Exception as e:
+                print(f"Error writing quarantine data to {quarantine_table}: {e}")
 
-    job.commit()
+    session.close()
+
 
 if __name__ == "__main__":
     main()
