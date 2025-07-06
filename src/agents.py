@@ -7,6 +7,7 @@ from src.lineage_tasks import generate_lineage_json
 from src.airflow_task import generate_airflow_dag
 from src.dbt_vault_tasks import generate_dbt_vault_models, generate_dbt_project_files
 from src.dbt_test_tasks import generate_dbt_tests, generate_dbt_sources_yml
+from src.code_validator import CodeValidator
 
 class CustomAgent:
     def __init__(self, role, goal, backstory, llm):
@@ -171,6 +172,19 @@ class Agents:
                 # Generate dbT project files
                 project_files = generate_dbt_project_files()
                 
+                # Validate dbT models if agentic generation is enabled
+                if use_agentic:
+                    validator = CodeValidator()
+                    validated_models = {}
+                    for model_name, model_sql in vault_models.items():
+                        validation_errors = validator.validate_code(model_sql, "dbt")
+                        if validation_errors:
+                            print(f"⚠️ Validation warnings for {model_name}: {validation_errors}")
+                            # For now, we'll keep the model but log warnings
+                            # Future enhancement: implement retry logic with LLM feedback
+                        validated_models[model_name] = model_sql
+                    vault_models = validated_models
+                
                 # Combine vault models and project files
                 outputs["etl"] = {
                     "vault_models": vault_models,
@@ -178,7 +192,7 @@ class Agents:
                 }
             else:
                 # Use regular ETL agent for other platforms
-                outputs["etl"] = self.etl_agent.execute_task(
+                etl_code = self.etl_agent.execute_task(
                     metadata=source_metadata_df,
                     target_metadata=target_metadata_df,
                     mapping_metadata=mapping_metadata_df,
@@ -186,6 +200,16 @@ class Agents:
                     target_platform=target_platform,
                     use_agentic=use_agentic
                 )
+                
+                # Validate Python ETL code if agentic generation is enabled
+                if use_agentic and isinstance(etl_code, str):
+                    validator = CodeValidator()
+                    validation_errors = validator.validate_code(etl_code, "python")
+                    if validation_errors:
+                        print(f"⚠️ Validation warnings for ETL code: {validation_errors}")
+                        # Future enhancement: implement retry logic with LLM feedback
+                
+                outputs["etl"] = etl_code
 
         if generate_dq and target_metadata_df is not None:
             if is_dbt_vault:
@@ -199,27 +223,61 @@ class Agents:
                 sources_yml = generate_dbt_sources_yml(source_metadata_df)
                 if sources_yml:
                     outputs["sources_yml"] = sources_yml
+                
+                # Validate dbT test files if agentic generation is enabled
+                if use_agentic and isinstance(outputs["dq"], dict):
+                    validator = CodeValidator()
+                    validated_dq_files = {}
+                    for file_name, file_content in outputs["dq"].items():
+                        file_type = "sql" if file_name.endswith(".sql") else "dbt" # Assuming schema.yml is 'dbt' for basic checks
+                        validation_errors = validator.validate_code(file_content, file_type)
+                        if validation_errors:
+                            print(f"⚠️ Validation warnings for DQ file {file_name}: {validation_errors}")
+                        validated_dq_files[file_name] = file_content
+                    outputs["dq"] = validated_dq_files
             else:
                 # Use regular DQ agent for other platforms
-                outputs["dq"] = self.dq_agent.execute_task(
+                dq_code = self.dq_agent.execute_task(
                     metadata=target_metadata_df,
                     use_agentic=use_agentic
                 )
+                
+                # Validate Python DQ code if agentic generation is enabled
+                if use_agentic and isinstance(dq_code, str):
+                    validator = CodeValidator()
+                    validation_errors = validator.validate_code(dq_code, "python")
+                    if validation_errors:
+                        print(f"⚠️ Validation warnings for DQ code: {validation_errors}")
+                outputs["dq"] = dq_code
 
         if generate_airflow:
             if is_dbt_vault:
                 # Generate dbT-specific Airflow DAG
-                outputs["airflow_dag"] = self._generate_dbt_airflow_dag(
+                airflow_dag_code = self._generate_dbt_airflow_dag(
                     etl_metadata_df, use_agentic
                 )
+                # Validate dbT Airflow DAG if agentic generation is enabled
+                if use_agentic and isinstance(airflow_dag_code, str):
+                    validator = CodeValidator()
+                    validation_errors = validator.validate_code(airflow_dag_code, "python")
+                    if validation_errors:
+                        print(f"⚠️ Validation warnings for dbT Airflow DAG: {validation_errors}")
+                outputs["airflow_dag"] = airflow_dag_code
             elif etl_script:
                 # Generate regular Airflow DAG
-                outputs["airflow_dag"] = self.airflow_agent.execute_task(
+                airflow_dag_code = self.airflow_agent.execute_task(
                     etl_script=etl_script,
                     metadata=etl_metadata_df,
                     generation_mode=airflow_generation_mode,
                     use_agentic=use_agentic
                 )
+                # Validate regular Airflow DAG if agentic generation is enabled
+                if use_agentic and isinstance(airflow_dag_code, str):
+                    validator = CodeValidator()
+                    validation_errors = validator.validate_code(airflow_dag_code, "python")
+                    if validation_errors:
+                        print(f"⚠️ Validation warnings for Airflow DAG: {validation_errors}")
+                outputs["airflow_dag"] = airflow_dag_code
 
         if generate_lineage and mapping_metadata_df is not None:
             outputs["lineage"] = self.lineage_agent.execute_task(
